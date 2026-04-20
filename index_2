@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyTask Clone - Google Calendar Fixed</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="handleClientLoad()"></script>
+    <style> /* Sama seperti sebelumnya, skip untuk singkat */ 
+        body { font-family: Arial; max-width: 700px; margin: 50px auto; padding: 20px; }
+        /* ... CSS sama persis seperti kode lama ... */
+    </style>
+</head>
+<body>
+    <!-- HTML sama seperti kode sebelumnya, hanya tambah console logs -->
+    <h1>🗓️ MyTask Fixed Google Login</h1>
+    <!-- Input & list sama -->
+    <div id="authStatus">Status: Belum login</div>
+    <div id="authDiv"></div>
+    <button id="syncBtn" onclick="syncToCalendar()" disabled style="display:none;">✅ Sync ke Calendar</button>
+
+    <script>
+        const CLIENT_ID = '787613739991-6lbv41iedo5s3rmdhlg885he3tgid295.apps.googleusercontent.com'; // GANTI INI!
+        const SCOPES = 'https://www.googleapis.com/auth/calendar.events';
+        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
+        let tokenClient;
+        let gapiInited = false;
+        let gisInited = false;
+        let accessToken = null;
+
+        function handleClientLoad() {
+            console.log('GAPI loaded');
+            gapi.load('client', async () => {
+                try {
+                    await gapi.client.init({
+                        discoveryDocs: [DISCOVERY_DOC],
+                    });
+                    gapiInited = true;
+                    initClient();
+                } catch (error) {
+                    console.error('GAPI init error:', error);
+                }
+            });
+        }
+
+        function initClient() {
+            if (gisInited) {
+                google.accounts.oauth2.initTokenClient({
+                    client_id: CLIENT_ID,
+                    scope: SCOPES,
+                    callback: (tokenResponse) => {
+                        if (tokenResponse.access_token) {
+                            accessToken = tokenResponse.access_token;
+                            document.getElementById('syncBtn').disabled = false;
+                            document.getElementById('syncBtn').style.display = 'block';
+                            document.getElementById('authStatus').textContent = '✅ Logged in!';
+                            console.log('Token got:', accessToken);
+                        } else {
+                            console.error('No token:', tokenResponse);
+                        }
+                    },
+                });
+            }
+        }
+
+        function gisLoaded() {
+            console.log('GIS loaded');
+            gisInited = true;
+            initClient();
+        }
+
+        function handleAuthClick() {
+            console.log('Auth click');
+            if (!tokenClient) {
+                alert('Google scripts belum load. Tunggu 5 detik.');
+                return;
+            }
+            tokenClient.requestAccessToken({ prompt: 'consent' });
+        }
+
+        function syncToCalendar() {
+            if (!accessToken) {
+                alert('Login dulu!');
+                return;
+            }
+            // Gunakan fetch untuk insert event (hindari gapi CORS)
+            tasks.filter(t => !t.done && t.dueDate).forEach(async (task) => {
+                const event = {
+                    summary: task.text,
+                    start: { dateTime: task.dueDate + 'T09:00:00' },
+                    end: { dateTime: task.dueDate + 'T10:00:00' }
+                };
+                try {
+                    const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(event)
+                    });
+                    if (res.ok) console.log('Synced:', task.text);
+                    else console.error('Sync error:', await res.text());
+                } catch (e) {
+                    console.error('Fetch error:', e);
+                }
+            });
+            alert('Sync done! Check calendar.');
+        }
+
+        // Sisanya sama: tasks, render, dll dari kode lama
+        // ... (paste fungsi tasks, render, dll dari kode sebelumnya)
+
+        window.gisLoaded = gisLoaded; // Global untuk script onload
+    </script>
+</body>
+</html>
