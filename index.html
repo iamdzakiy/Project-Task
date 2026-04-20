@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyTask Clone - Full Features</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 700px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #333; text-align: center; }
+        .input-group { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        input, button { padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+        input[type="text"], input[type="date"] { flex: 1; min-width: 150px; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; transition: background 0.3s; }
+        button:hover { background: #0056b3; }
+        button.danger { background: #dc3545; }
+        ul { list-style: none; padding: 0; }
+        li { background: white; margin-bottom: 10px; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 10px; }
+        .task-text { flex: 1; font-weight: 500; }
+        .due-date { font-size: 14px; color: #666; }
+        .expired { border-left: 4px solid #dc3545; }
+        .done { opacity: 0.7; text-decoration: line-through; }
+        .controls { display: flex; gap: 5px; }
+        #authDiv { text-align: center; margin: 20px 0; }
+        @media (max-width: 600px) { .input-group { flex-direction: column; } }
+    </style>
+</head>
+<body>
+    <h1>🗓️ MyTask Clone Full</h1>
+    <div class="input-group">
+        <input type="text" id="taskInput" placeholder="Tugas baru...">
+        <input type="date" id="dueDateInput">
+        <button onclick="addOrUpdateTask()">Tambah/Update</button>
+        <button onclick="clearEdit()">Batal Edit</button>
+    </div>
+    <div>
+        <button onclick="filterTasks('all')">Semua</button>
+        <button onclick="filterTasks('pending')">Pending</button>
+        <button onclick="filterTasks('done')">Selesai</button>
+        <button onclick="sortByDate()">Sort Tanggal</button>
+        <div id="authDiv"></div>
+        <button id="syncBtn" onclick="syncToCalendar()" style="display:none;">Sync ke Google Calendar</button>
+    </div>
+    <ul id="taskList"></ul>
+
+    <script>
+        const CLIENT_ID = '787613739991-6lbv41iedo5s3rmdhlg885he3tgid295.apps.googleusercontent.com.apps.googleusercontent.com'; // Ganti dari Google Console!
+        const API_KEY = 'YOUR_API_KEY'; // Optional, buat di Google Console jika butuh
+        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
+        const SCOPES = 'https://www.googleapis.com/auth/calendar.events';
+
+        let tasks = JSON.parse(localStorage.getItem('tasks')) || [];
+        let editingId = null;
+        let filter = 'all';
+        let tokenClient;
+        let gapiLoaded = false;
+        let gisLoaded = false;
+
+        function initGoogle() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: (tokenResponse) => {
+                    loadCalendarApi();
+                },
+            });
+            document.getElementById('authorize_button').style.display = 'none';
+            document.getElementById('syncBtn').style.display = 'block';
+        }
+
+        function loadCalendarApi() {
+            gapi.load('client:auth2', () => {
+                gapi.client.init({
+                    apiKey: API_KEY,
+                    discoveryDocs: [DISCOVERY_DOC],
+                }).then(() => {
+                    console.log('Google Calendar ready');
+                });
+            });
+        }
+
+        function handleAuthClick() {
+            tokenClient.requestAccessToken({prompt: 'consent'});
+        }
+
+        function renderAuthStatus() {
+            document.getElementById('authDiv').innerHTML = `
+                <div class="button" id="authorize_button" onclick="handleAuthClick()">Login Google Calendar</div>
+            `;
+        }
+        renderAuthStatus();
+
+        function addOrUpdateTask() {
+            const text = document.getElementById('taskInput').value.trim();
+            const dueDate = document.getElementById('dueDateInput').value;
+            if (!text) return;
+            if (editingId) {
+                const task = tasks.find(t => t.id === editingId);
+                task.text = text;
+                task.dueDate = dueDate;
+                editingId = null;
+            } else {
+                const id = Date.now().toString();
+                tasks.push({ id, text, dueDate, done: false, created: new Date().toISOString() });
+            }
+            document.getElementById('taskInput').value = '';
+            document.getElementById('dueDateInput').value = '';
+            saveAndRender();
+        }
+
+        function editTask(id) {
+            const task = tasks.find(t => t.id === id);
+            document.getElementById('taskInput').value = task.text;
+            document.getElementById('dueDateInput').value = task.dueDate;
+            editingId = id;
+        }
+
+        function toggleDone(id) {
+            const task = tasks.find(t => t.id === id);
+            task.done = !task.done;
+            saveAndRender();
+        }
+
+        function deleteTask(id) {
+            tasks = tasks.filter(t => t.id !== id);
+            saveAndRender();
+        }
+
+        function clearEdit() {
+            editingId = null;
+            document.getElementById('taskInput').value = '';
+            document.getElementById('dueDateInput').value = '';
+        }
+
+        function filterTasks(type) {
+            filter = type;
+            render();
+        }
+
+        function sortByDate() {
+            tasks.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+            saveAndRender();
+        }
+
+        function isExpired(dueDate) {
+            return new Date(dueDate) < new Date();
+        }
+
+        function syncToCalendar() {
+            if (!gapi.client.calendar) return alert('Google Calendar belum siap. Login ulang.');
+            tasks.forEach(task => {
+                if (!task.done && task.dueDate) {
+                    const event = {
+                        summary: task.text,
+                        start: { dateTime: task.dueDate + 'T09:00:00' },
+                        end: { dateTime: task.dueDate + 'T10:00:00' },
+                    };
+                    gapi.client.calendar.events.insert({ calendarId: 'primary', resource: event }).then(() => console.log('Synced:', task.text));
+                }
+            });
+            alert('Sync selesai! Cek Google Calendar Anda.');
+        }
+
+        function saveAndRender() {
+            localStorage.setItem('tasks', JSON.stringify(tasks));
+            render();
+        }
+
+        function render() {
+            const list = document.getElementById('taskList');
+            list.innerHTML = '';
+            let filtered = tasks.filter(task => {
+                if (filter === 'pending') return !task.done;
+                if (filter === 'done') return task.done;
+                return true;
+            });
+            filtered.forEach(task => {
+                const li = document.createElement('li');
+                li.className = `task-item ${task.done ? 'done' : ''} ${isExpired(task.dueDate) ? 'expired' : ''}`;
+                li.innerHTML = `
+                    <input type="checkbox" ${task.done ? 'checked' : ''} onchange="toggleDone('${task.id}')">
+                    <div>
+                        <div class="task-text">${task.text}</div>
+                        <div class="due-date">Due: ${task.dueDate || 'No date'}</div>
+                    </div>
+                    <div class="controls">
+                        <button onclick="editTask('${task.id}')">Edit</button>
+                        <button class="danger" onclick="deleteTask('${task.id}')">Hapus</button>
+                    </div>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        // Init
+        document.getElementById('dueDateInput').valueAsDate = new Date();
+        window.onload = () => {
+            render();
+            gapiLoaded = true;
+            if (gisLoaded) initGoogle();
+        };
+        window.onGoogleScriptInit = () => {
+            gisLoaded = true;
+            if (gapiLoaded) initGoogle();
+        };
+    </script>
+</body>
+</html>
